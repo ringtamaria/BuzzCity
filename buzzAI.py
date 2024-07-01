@@ -79,32 +79,51 @@ numeric_columns = ['広告アカウントID',
 text_columns = ['企業名', 'クライアント名', '商品名', 'カテゴリー', 'URL', '配信ステータス', '配信目的']
 date_columns = ['投稿日']
 
+# データのクレンジング
+def clean_numeric(value):
+    if isinstance(value, str):
+        value = value.replace('¥', '').replace(',', '').replace('%', '').replace('￥', '')
+        if value in ['#DIV/0!', '#VALUE!', '#REF!']:
+            value = 0
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+for column in numeric_columns:
+    data[column] = data[column].apply(clean_numeric)
+
 # 重複している列を削除
 numeric_data = data[numeric_columns].copy()
-numeric_data = numeric_data.loc[:,~numeric_data.columns.duplicated()]
+numeric_data = numeric_data.loc[:, ~numeric_data.columns.duplicated()]
 text_data = data[text_columns].copy()
 date_data = data[date_columns].copy()
 
 # データの型変換（必要な場合）
 date_data[date_columns] = date_data[date_columns].apply(pd.to_datetime, errors='coerce')
 
-# 欠損値と#DIV/0!の処理
-# 数値データの欠損値と#DIV/0!をNaNに変換
-numeric_data.replace(to_replace='#DIV/0!', value=np.nan, inplace=True)
-numeric_data = numeric_data.apply(pd.to_numeric, errors='coerce')
+# 欠損値と#DIV/0!、#VALUE!、#REF!の処理
+# 数値データの欠損値と#DIV/0!、#VALUE!、#REF!を0に変換
+numeric_data = numeric_data.replace({'#DIV/0!': 0, '#VALUE!': 0, '#REF!': 0}).fillna(0)
 
-# テキストデータの欠損値と#DIV/0!をNoneに変換
-text_data.replace(to_replace='#DIV/0!', value=None, inplace=True)
+# テキストデータの欠損値と#DIV/0!、#VALUE!、#REF!をNoneに変換
+text_data.replace(to_replace=['#DIV/0!', '#VALUE!', '#REF!'], value=None, inplace=True)
 text_data = text_data.where(pd.notnull(text_data), None)
 
 # 日付データの欠損値をNaTに変換
-date_data.replace(to_replace='#DIV/0!', value=np.nan, inplace=True)
+date_data.replace(to_replace=['#DIV/0!', '#VALUE!', '#REF!'], value=np.nan, inplace=True)
 date_data = date_data.where(pd.notnull(date_data), None)
 
 # 欠損値と#DIV/0!の処理 (NaNをNULLに変換)
 numeric_data = numeric_data.fillna(np.nan).replace([np.nan], [None])
+numeric_data = numeric_data.replace({'#DIV/0!': np.nan}).fillna(0)
 text_data = text_data.fillna(np.nan).replace([np.nan], [None])
 date_data = date_data.fillna(np.nan).replace([np.nan], [None])
+
+# データをCSVファイルに出力
+#numeric_data.to_csv('/Users/p10475/BuzzCity/cleaned_numeric_data04.csv', index=False)
+# text_data.to_csv('/Users/p10475/BuzzCity/cleaned_text_data01.csv', index=False)
+# date_data.to_csv('/Users/p10475/BuzzCity/cleaned_date_data01.csv', index=False)
 
 
 # データベース接続
