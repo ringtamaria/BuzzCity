@@ -1,36 +1,74 @@
-
 import os
 import cv2
-import subprocess
+import mysql.connector as mydb
+import buzzAI
 
-# TikTokのURL
-url = 'https://vt.tiktok.com/ZSRmjy3pM/'
+# 動画ファイルのディレクトリパス
+video_dir = '/Users/p10475/BuzzCity/tiktok_video'
 
-# yt-dlpで動画をダウンロード
-subprocess.run(['yt-dlp', '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', url])
+# データベース接続
+conn = mydb.connect(
+    host="localhost",
+    port='3306',
+    user="rintamaria",
+    password="buzzai",
+    database="mydb"
+)
+cursor = conn.cursor()
 
-# ダウンロードした動画のファイル名を取得
-video_filename = subprocess.check_output(['yt-dlp', '--get-filename', url]).decode().strip()
+# テーブル作成 (存在しない場合)
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS videos (
+        id INTEGER PRIMARY KEY AUTO_INCREMENT,
+        video_id TEXT,
+        video_path TEXT,
+        frame_count INTEGER
+    )
+''')
 
-# 動画を読み込む
-cap = cv2.VideoCapture(video_filename)
+# 動画ファイルのリストを取得
+video_files = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
 
-if not cap.isOpened():
-    print("Error: Could not open video.")
-    exit()
+# IDの最小値を取得 (buzzAI.pyのdataから)
+min_video_id = buzzAI.data['id'].min()
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+for video_file in video_files:
+    try:
+        # ファイル名からIDを抽出
+        video_id = int(video_file.split('.')[0])
 
-    # フレームを表示
-    cv2.imshow('TikTok Video', frame)
+        # buzzAI.pyのdataからIDが存在するか確認
+        if video_id in buzzAI.data['id'].values:
+            # 動画ファイルのパス
+            video_path = os.path.join(video_dir, video_file)
 
-    # 'q'キーが押されたらループを終了
-    if cv2.waitKey(25) & 0xFF == ord('q'):
-        break
+            # 動画を読み込む
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                print(f"Error: Could not open video {video_file}")
+                continue
 
-# リソースを解放
-cap.release()
-cv2.destroyAllWindows()
+            # フレーム数をカウント
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            # データベースのIDをvideo_idと一致させる
+            db_id = video_id - min_video_id + 1  # 最小のvideo_idからの差分を計算
+
+            # SQLクエリを実行し、データベースに情報を挿入または更新
+            insert_query = """
+            INSERT INTO videos (id, video_id, video_path, frame_count) 
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE video_path = VALUES(video_path), frame_count = VALUES(frame_count)
+            """
+            cursor.execute(insert_query, (db_id, video_id, video_path, frame_count))
+            conn.commit()
+
+            print(f"Processed video: {video_file}, frame count: {frame_count}, inserted into database with ID: {db_id}")
+        else:
+            print(f"Video ID {video_id} not found in CSV data.")
+
+    except Exception as e:
+        print(f"Error processing {video_file}: {e}")
+
+# データベース接続を閉じる
+conn.close()
