@@ -72,3 +72,4 @@ for video_file in video_files:
 
 # データベース接続を閉じる
 conn.close()
+
