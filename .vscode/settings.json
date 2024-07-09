@@ -1,0 +1,7 @@
+{
+    "python.languageServer": "Pylance",
+    "python.pythonPath": "/opt/anaconda3/envs/video_analysis_env/bin/python",
+    "python.analysis.extraPaths": [
+        "/opt/anaconda3/envs/video_analysis_env/lib/python3.8/site-packages"
+    ]
+}

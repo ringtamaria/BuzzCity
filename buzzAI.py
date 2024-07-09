@@ -101,6 +101,8 @@ date_data = data[date_columns].copy()
 
 # データの型変換（必要な場合）
 date_data[date_columns] = date_data[date_columns].apply(pd.to_datetime, errors='coerce')
+date_data['投稿日'] = pd.to_datetime(date_data['投稿日'], errors='coerce')  # 変換エラーを無視
+date_data['投稿日'] = date_data['投稿日'].dt.strftime('%Y-%m-%d')
 
 # 欠損値と#DIV/0!、#VALUE!、#REF!の処理
 # 数値データの欠損値と#DIV/0!、#VALUE!、#REF!を0に変換
