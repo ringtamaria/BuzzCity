@@ -22,8 +22,9 @@ import seaborn as sns
 import spacy
 from textblob import TextBlob
 from category_encoders import TargetEncoder
-# buzzAI.py から変数をインポート
+from sklearn.feature_selection import SelectFromModel
 
+# buzzAI.py から変数をインポート
 from buzzAI import numeric_columns, text_columns, date_columns
 
 # 設定ファイルの読み込み
@@ -44,9 +45,17 @@ cursor = conn.cursor()
 cursor.execute("SELECT video_id, video_path, frame_count FROM videos")
 video_data = pd.DataFrame(cursor.fetchall(), columns=['video_id', 'video_path', 'frame_count'])
 
-# データベースからCSVデータを読み込み
+# データベースから数値データを読み込み
 cursor.execute("SELECT * FROM numeric_data")
-csv_data = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+numeric_data = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+
+# データベースからテキストデータを読み込み
+cursor.execute("SELECT * FROM text_data")
+text_data = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+
+# データベースから日付データを読み込み
+cursor.execute("SELECT * FROM date_data")
+date_data = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
 
 # OCRの準備 (Tesseract OCRのパスを設定)
 pytesseract.pytesseract.tesseract_cmd = r'/opt/homebrew/Cellar/tesseract/5.4.1/bin/tesseract'
@@ -89,11 +98,15 @@ def handle_outliers(df, column):
     df[column] = np.where(df[column] > upper_bound, upper_bound,
                           np.where(df[column] < lower_bound, lower_bound, df[column]))
 
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("ja_core_news_sm") 
 
-def extract_keywords(text):
-    doc = nlp(text)
-    return [token.lemma_ for token in doc if token.is_alpha and not token.is_stop]
+def extract_keywords(text, chunk_size=45000):  # chunk_sizeで分割サイズを指定
+    keywords = []
+    for i in range(0, len(text), chunk_size):
+        chunk = text[i:i+chunk_size]
+        doc = nlp(chunk)
+        keywords.extend([token.lemma_ for token in doc if token.is_alpha and not token.is_stop])
+    return keywords
 
 def analyze_sentiment(text):
     blob = TextBlob(text)
@@ -114,177 +127,176 @@ def extract_features(video_path, frame_count):
 
     features = {
         'num_texts': num_texts,
-        'avg_size': avg_size,
-        'avg_color_r': avg_color[0],
-        'avg_color_g': avg_color[1],
-        'avg_color_b': avg_color[2],
+        'avg_size': float(avg_size),      # float64 -> float に変換
+        'avg_color_r': float(avg_color[0]),  # float64 -> float に変換
+        'avg_color_g': float(avg_color[1]),  # float64 -> float に変換
+        'avg_color_b': float(avg_color[2]),  # float64 -> float に変換
         'frame_count': frame_count,
         'keywords': ' '.join(keywords),
-        'sentiment': sentiment
+        'sentiment': float(sentiment)     # float64 -> float に変換
     }
 
     return features
 
-# 手動でカラムを指定してデータを分割
-numeric_columns = ['広告アカウントID',
-                   'campaign_id',
-                   '想定再生回数',
-                   '実績再生回数',
-                   '総額',
-                   '配信予算',
-                   '配信費用',
-                   '想定再生単価',
-                   '実績再生単価',
-                   '視聴達成率',
-                   '掲載単価N',  # カッコを削除
-                   '動画秒数',
-                   'いいね',
-                   'いいね率',
-                   'コメント',
-                   'コメント率',
-                   'シェア',
-                   'シェア率',
-                   '保存',
-                   '保存率',
-                   'ENG数',
-                   'ENG率',
-                   'cpc',
-                   'CPM',
-                   'IMP数',
-                   'CL数',
-                   'CTR',
-                   'リーチ数',
-                   'FQ',
-                   'リーチ率',
-                   '動画視聴数',
-                   '2秒視聴率',
-                   '2秒動画再生数',
-                   '6秒視聴率',
-                   '6秒動画再生数',
-                   '完全視聴率',
-                   '再生完了数',
-                   '再生長さ75パーセント',  # カッコを削除し、表現を変更
-                   '再生長さ50パーセント',  # カッコを削除し、表現を変更
-                   '再生長さ25パーセント',  # カッコを削除し、表現を変更
-                   '平均再生秒数',
-                   '一人当たりの平均視聴時間',
-                   'オーガニック再生数',  # カッコを削除
-                   'リーチ単価',
-                   '視聴単価',
-                   '完全視聴単価',
-                   'エンゲージ単価']
-text_columns = ['企業名', 'クライアント名', '商品名', 'カテゴリー', 'URL', '配信ステータス', '配信目的']
-date_columns = ['投稿日']
-
 # データ前処理
 for col in numeric_columns:
-    handle_outliers(csv_data, col)
+    handle_outliers(numeric_data, col)
 
 # スケーリング
 scaler = StandardScaler()
-csv_data[numeric_columns] = scaler.fit_transform(csv_data[numeric_columns])
+numeric_data[numeric_columns] = scaler.fit_transform(numeric_data[numeric_columns])
 
 # 数値データの正規化
 pt = PowerTransformer(method='box-cox')
 for col in numeric_columns:
-    if (csv_data[col] > 0).all():  # Box-Cox変換は正の値のみを対象とする
-        csv_data[col] = pt.fit_transform(csv_data[[col]])
+    if (numeric_data[col] > 0).all():  # Box-Cox変換は正の値のみを対象とする
+        numeric_data[col] = pt.fit_transform(numeric_data[[col]])
 
 # テキストデータのエンコーディング
 encoder = TargetEncoder()
 for col in text_columns:
-    if col in csv_data.columns:
-        csv_data[f'encoded_{col}'] = encoder.fit_transform(csv_data[col], csv_data['動画視聴数'])
+    if col in text_data.columns:
+        text_data[f'encoded_{col}'] = encoder.fit_transform(text_data[col], numeric_data['動画視聴数'])
 
 video_features = video_data.apply(lambda row: extract_features(row['video_path'], row['frame_count']), axis=1)
 video_features_df = pd.DataFrame(video_features.tolist())
 
-# データ結合
-merged_data = pd.merge(video_data[['video_id', 'frame_count']], csv_data, left_on='video_id', right_on='id', how='inner')
-merged_data = pd.concat([merged_data, video_features_df], axis=1)
+# video_features テーブルの存在確認
+cursor.execute("SHOW TABLES LIKE 'video_features'")
+table_exists = cursor.fetchone()
 
-# 特徴量とターゲットの分割
-X = merged_data.drop(['video_id', '動画視聴数'], axis=1)  # video_idと動画視聴数は学習には不要
-y = merged_data['動画視聴数']  # ターゲット変数
+# video_features テーブルの作成 (存在しない場合)
+if not table_exists:
+    cursor.execute('''
+        CREATE TABLE video_features (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            video_id BIGINT,
+            num_texts INT,
+            avg_size FLOAT,
+            avg_color_r FLOAT,
+            avg_color_g FLOAT,
+            avg_color_b FLOAT,
+            keywords TEXT,
+            sentiment FLOAT,
+            FOREIGN KEY (video_id) REFERENCES videos(video_id)
+        )
+    ''')
 
-# 特徴量選択
-selector = SelectKBest(f_regression, k='all')  # k='all'は全ての特徴量を使うことを意味しますが、必要に応じて数を調整してください
-X_selected = selector.fit_transform(X, y)
+# 動画の特徴量を抽出し、データベースに保存
+for index, row in video_data.iterrows():
+    video_id = row['video_id']
+    video_path = row['video_path']
+    frame_count = row['frame_count']
 
-# データ分割
-X_train, X_test, y_train, y_test = train_test_split(X_selected, y, test_size=0.2, random_state=42)
+    # 特徴量抽出
+    features = extract_features(video_path, frame_count)
 
-# モデル選択と学習
-models = {
-    'RandomForest': RandomForestRegressor(),
-    'GradientBoosting': GradientBoostingRegressor(),
-    'SVM': SVR(),
-    'NeuralNetwork': MLPRegressor()
-}
+    # SQLクエリを実行し、video_featuresテーブルに情報を挿入
+    insert_query = """
+    INSERT INTO video_features (video_id, num_texts, avg_size, avg_color_r, avg_color_g, avg_color_b, keywords, sentiment)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    cursor.execute(insert_query, (video_id, features['num_texts'], features['avg_size'], features['avg_color_r'], features['avg_color_g'], features['avg_color_b'], features['keywords'], features['sentiment']))
+    conn.commit()
 
-param_grids = {
-    'RandomForest': {'n_estimators': [100, 200, 300], 'max_depth': [10, 20, 30]},
-    'GradientBoosting': {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300]},
-    'SVM': {'C': [0.1, 1, 10], 'kernel': ['linear', 'rbf']},
-    'NeuralNetwork': {'hidden_layer_sizes': [(50,), (100,), (100, 50)], 'alpha': [0.0001, 0.001]}
-}
+    print(f"Processed video: {video_path}, features inserted into database.")
 
-best_models = {}
-for name, model in models.items():
-    grid_search = GridSearchCV(model, param_grids[name], cv=5, scoring='neg_mean_squared_error')
-    grid_search.fit(X_train, y_train)
-    best_models[name] = grid_search.best_estimator_
+# # video_featuresテーブルから特徴量を読み込み
+# cursor.execute("SELECT * FROM video_features")
+# video_features_data = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
 
-# アンサンブル学習
-voting_regressor = VotingRegressor(estimators=[(name, model) for name, model in best_models.items()])
-voting_regressor.fit(X_train, y_train)
+# # 日付データからの特徴量エンジニアリング
+# date_data['投稿日'] = pd.to_datetime(date_data['投稿日'])
+# date_data['曜日'] = date_data['投稿日'].dt.dayofweek  # 曜日を抽出 (0: 月曜日, 6: 日曜日)
+# date_data['季節'] = date_data['投稿日'].dt.month % 12 // 3  # 季節を抽出 (0: 春, 1: 夏, 2: 秋, 3: 冬)
 
-# 学習曲線のプロット
-train_sizes, train_scores, test_scores = learning_curve(voting_regressor, X_train, y_train, cv=5, scoring='neg_mean_squared_error', train_sizes=np.linspace(0.1, 1.0, 10))
+# # データ結合
+# merged_data = pd.merge(video_data[['video_id', 'frame_count']], numeric_data, on='id', how='inner')
+# merged_data = pd.merge(merged_data, text_data, on='id', how='inner')
+# merged_data = pd.merge(merged_data, date_data, on='id', how='inner')
+# merged_data = pd.merge(merged_data, video_features_data, on='video_id', how='inner')
+# #merged_data = pd.concat([merged_data, video_features_df], axis=1)
 
-train_scores_mean = -train_scores.mean(axis=1)
-test_scores_mean = -test_scores.mean(axis=1)
+# # 特徴量とターゲットの分割
+# X = merged_data.drop(['video_id', '動画視聴数'], axis=1)  # video_idと動画視聴数は学習には不要
+# y = merged_data['動画視聴数']  # ターゲット変数
 
-plt.figure()
-plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Training score")
-plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Cross-validation score")
-plt.title('Learning Curve')
-plt.xlabel('Training Size')
-plt.ylabel('MSE')
-plt.legend(loc="best")
-plt.show()
+# # 特徴量選択
+# selector = SelectKBest(f_regression, k='all')  # k='all'は全ての特徴量を使うことを意味しますが、必要に応じて数を調整してください
+# X_selected = selector.fit_transform(X, y)
 
-# モデルの評価
-def evaluate_model(model, X_test, y_test):
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
-    mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
+# # データ分割
+# X_train, X_test, y_train, y_test = train_test_split(X_selected, y, test_size=0.2, random_state=42)
+
+# # モデル選択と学習
+# models = {
+#     'RandomForest': RandomForestRegressor(),
+#     'GradientBoosting': GradientBoostingRegressor(),
+#     'SVM': SVR(),
+#     'NeuralNetwork': MLPRegressor()
+# }
+
+# param_grids = {
+#     'RandomForest': {'n_estimators': [100, 200, 300], 'max_depth': [10, 20, 30]},
+#     'GradientBoosting': {'learning_rate': [0.01, 0.1, 0.2], 'n_estimators': [100, 200, 300]},
+#     'SVM': {'C': [0.1, 1, 10], 'kernel': ['linear', 'rbf']},
+#     'NeuralNetwork': {'hidden_layer_sizes': [(50,), (100,), (100, 50)], 'alpha': [0.0001, 0.001]}
+# }
+
+# best_models = {}
+# for name, model in models.items():
+#     grid_search = GridSearchCV(model, param_grids[name], cv=5, scoring='neg_mean_squared_error')
+#     grid_search.fit(X_train, y_train)
+#     best_models[name] = grid_search.best_estimator_
+# # アンサンブル学習
+# voting_regressor = VotingRegressor(estimators=[(name, model) for name, model in best_models.items()])
+# voting_regressor.fit(X_train, y_train)
+
+# # 学習曲線のプロット
+# train_sizes, train_scores, test_scores = learning_curve(voting_regressor, X_train, y_train, cv=5, scoring='neg_mean_squared_error', train_sizes=np.linspace(0.1, 1.0, 10))
+
+# train_scores_mean = -train_scores.mean(axis=1)
+# test_scores_mean = -test_scores.mean(axis=1)
+
+# plt.figure()
+# plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Training score")
+# plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Cross-validation score")
+# plt.title('Learning Curve')
+# plt.xlabel('Training Size')
+# plt.ylabel('MSE')
+# plt.legend(loc="best")
+# plt.show()
+
+# # モデルの評価
+# def evaluate_model(model, X_test, y_test):
+#     y_pred = model.predict(X_test)
+#     mse = mean_squared_error(y_test, y_pred)
+#     r2 = r2_score(y_test, y_pred)
+#     mae = mean_absolute_error(y_test, y_pred)
+#     mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
     
-    print(f'Model: {model.__class__.__name__}')
-    print(f'Mean Squared Error: {mse}')
-    print(f'R^2 Score: {r2}')
-    print(f'Mean Absolute Error: {mae}')
-    print(f'Mean Absolute Percentage Error: {mape}')
+#     print(f'Model: {model.__class__.__name__}')
+#     print(f'Mean Squared Error: {mse}')
+#     print(f'R^2 Score: {r2}')
+#     print(f'Mean Absolute Error: {mae}')
+#     print(f'Mean Absolute Percentage Error: {mape}')
     
-    # 残差プロット
-    residuals = y_test - y_pred
-    plt.figure(figsize=(10, 6))
-    plt.scatter(y_pred, residuals)
-    plt.axhline(0, color='red', linestyle='--')
-    plt.xlabel('Predicted Values')
-    plt.ylabel('Residuals')
-    plt.title(f'Residuals vs Predicted Values for {model.__class__.__name__}')
-    plt.show()
+#     # 残差プロット
+#     residuals = y_test - y_pred
+#     plt.figure(figsize=(10, 6))
+#     plt.scatter(y_pred, residuals)
+#     plt.axhline(0, color='red', linestyle='--')
+#     plt.xlabel('Predicted Values')
+#     plt.ylabel('Residuals')
+#     plt.title(f'Residuals vs Predicted Values for {model.__class__.__name__}')
+#     plt.show()
 
-# 各モデルの評価
-for name, model in best_models.items():
-    evaluate_model(model, X_test, y_test)
+# # 各モデルの評価
+# for name, model in best_models.items():
+#     evaluate_model(model, X_test, y_test)
 
-# アンサンブルモデルの評価
-evaluate_model(voting_regressor, X_test, y_test)
+# # アンサンブルモデルの評価
+# evaluate_model(voting_regressor, X_test, y_test)
 
-# データベース接続を閉じる
-conn.close()
-
+# # データベース接続を閉じる
+# conn.close()
