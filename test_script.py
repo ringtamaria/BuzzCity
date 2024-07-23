@@ -1,17 +1,29 @@
-import torch
-from transformers import pipeline
+import os
+import cv2
+import mysql.connector as mydb
+import pandas as pd
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler, PowerTransformer, OneHotEncoder, MinMaxScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score, KFold, learning_curve
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor, StackingRegressor
+from sklearn.svm import SVR
+from sklearn.neural_network import MLPRegressor
+from sklearn.feature_selection import SelectKBest, f_regression
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import configparser
+import pytesseract
+from pytesseract import Output
+import matplotlib.pyplot as plt
+import seaborn as sns
+import spacy
+from textblob import TextBlob
+from category_encoders import TargetEncoder
+from sklearn.feature_selection import SelectFromModel
+from xgboost import XGBRegressor
+from lightgbm import LGBMRegressor
 
-device = 0 if torch.cuda.is_available() else -1
-
-print("Loading sentiment analysis pipeline...")
-# sentiment_analyzer = pipeline("sentiment-analysis", model="daigo/bert-base-japanese-sentiment", device=device)
-sentiment_analyzer = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment", device=device)
-
-def analyze_sentiment(text):
-    result = sentiment_analyzer(text)
-    return result[0]['label'], result[0]['score']
-
-# Test the function
-text = "これはテストです。"
-label, score = analyze_sentiment(text)
-print(f"Sentiment: {label}, Score: {score}")
+print("All modules imported successfully.")

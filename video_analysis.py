@@ -98,7 +98,7 @@ def handle_outliers(df, column):
     df[column] = np.where(df[column] > upper_bound, upper_bound,
                           np.where(df[column] < lower_bound, lower_bound, df[column]))
 
-nlp = spacy.load("ja_core_news_sm") 
+nlp = spacy.load("ja_core_news_sm")
 
 def extract_keywords(text, chunk_size=45000):  # chunk_sizeで分割サイズを指定
     keywords = []
@@ -122,7 +122,9 @@ def extract_features(video_path, frame_count):
     avg_color = np.mean([t['color'] for t in text_data], axis=0) if text_data else [0, 0, 0]
 
     combined_text = ' '.join([t['text'] for t in text_data])
-    keywords = extract_keywords(combined_text)
+    
+    # テキストを適切な長さに分割し、キーワードを抽出
+    keywords = extract_keywords(combined_text, chunk_size=45000)
     sentiment = analyze_sentiment(combined_text)
 
     features = {
@@ -200,6 +202,13 @@ for index, row in video_data.iterrows():
     conn.commit()
 
     print(f"Processed video: {video_path}, features inserted into database.")
+
+# データベース接続を閉じる
+conn.close()
+
+
+# video_featuresをCSVファイルに保存
+video_features_df.to_csv('video_features.csv', index=False)
 
 # # video_featuresテーブルから特徴量を読み込み
 # cursor.execute("SELECT * FROM video_features")
@@ -298,5 +307,5 @@ for index, row in video_data.iterrows():
 # # アンサンブルモデルの評価
 # evaluate_model(voting_regressor, X_test, y_test)
 
-# # データベース接続を閉じる
-# conn.close()
+# データベース接続を閉じる
+conn.close()
